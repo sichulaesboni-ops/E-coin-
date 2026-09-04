@@ -1,0 +1,144 @@
+ <!DOCTYPE html>
+<html lang="sw">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ECoin Tap - Earn ETC</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Top Bar -->
+        <div class="top-bar">
+            <div class="user-info">
+                <span class="user-avatar">👤</span>
+                <span id="userName">Mchezaji</span>
+            </div>
+            <div class="token-info">
+                <span class="token-symbol">ETC</span>
+                <span class="token-price">$0.00</span>
+            </div>
+        </div>
+
+        <!-- Balance Display -->
+        <div class="balance-container">
+            <div class="balance-card">
+                <p class="balance-label">💰 Salio Lako</p>
+                <h2 id="balance">0</h2>
+                <p class="balance-sub">≈ 0 ETC</p>
+                <div class="progress-container">
+                    <div class="progress-bar" id="progressBar" style="width: 0%"></div>
+                    <span class="progress-text" id="progressText">0% hadi Ngazi Inayofuata</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tap Button -->
+        <div class="tap-container">
+            <div class="tap-energy-wrapper">
+                <div class="energy-bar-container">
+                    <div class="energy-label">
+                        <span>⚡ Nishati</span>
+                        <span id="energyText">100/100</span>
+                    </div>
+                    <div class="energy-bar">
+                        <div class="energy-fill" id="energyFill" style="width: 100%"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <button id="tapButton" class="tap-button">
+                <div class="coin-wrapper">
+                    <div class="coin-3d">
+                        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%23FFD700' stroke='%23DAA520' stroke-width='3'/%3E%3Ccircle cx='50' cy='50' r='35' fill='%23FFC107'/%3E%3Ctext x='50' y='55' font-size='24' font-weight='bold' text-anchor='middle' fill='%23B8860B' font-family='Arial'%3EETC%3C/text%3E%3C/svg%3E" 
+                             alt="ECoin" 
+                             class="coin-image"
+                             id="coinImage">
+                    </div>
+                </div>
+                <span class="tap-text">Gusa Kupata</span>
+                <span class="tap-points" id="tapPoints">+0.001</span>
+            </button>
+
+            <div class="tap-stats">
+                <div class="stat-item">
+                    <span class="stat-icon">👆</span>
+                    <span class="stat-label">Taps Leo</span>
+                    <span class="stat-value" id="todayTaps">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-icon">⚡</span>
+                    <span class="stat-label">Multiplier</span>
+                    <span class="stat-value" id="multiplier">1.00x</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-icon">🏆</span>
+                    <span class="stat-label">Ngazi</span>
+                    <span class="stat-value" id="levelDisplay">1</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Wallet Section -->
+        <div class="section wallet-section">
+            <div class="section-header">
+                <h3>🔑 Anwani ya Wallet</h3>
+                <span class="section-badge">Airdrop</span>
+            </div>
+            <div class="wallet-input-group">
+                <input type="text" id="walletAddress" 
+                       placeholder="0x..." 
+                       maxlength="42"
+                       autocomplete="off"
+                       spellcheck="false">
+                <button id="saveWalletBtn" class="btn-primary">Hifadhi</button>
+            </div>
+            <div id="walletStatus" class="wallet-status"></div>
+            <p class="wallet-hint">⚠️ Hakikisha anwani ni sahihi. ETC zitatumwa hapa.</p>
+        </div>
+
+        <!-- Stats Section -->
+        <div class="section stats-section">
+            <div class="stat-grid">
+                <div class="stat-card">
+                    <span class="stat-label">Jumla ya Pointi</span>
+                    <span class="stat-number" id="totalPoints">0</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Jumla ya Taps</span>
+                    <span class="stat-number" id="totalTaps">0</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Wachezaji</span>
+                    <span class="stat-number" id="totalPlayers">1</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">ETC Zilizogawanywa</span>
+                    <span class="stat-number" id="totalDistributed">0</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Leaderboard -->
+        <div class="section leaderboard-section">
+            <div class="section-header">
+                <h3>🏆 Wachezaji Bora</h3>
+                <button id="refreshLeaderboard" class="btn-small">🔄</button>
+            </div>
+            <div id="leaderboardList" class="leaderboard-list">
+                <div class="loading-spinner">⏳ Inapakia...</div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p>ECoin (ETC) • Ethereum Network</p>
+            <p class="footer-small">Total Supply: 1,000,000 ETC • Batch Airdrop</p>
+            <p class="footer-small">v2.1.0 • Anti-Cheat Enabled 🔒</p>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
