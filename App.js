@@ -1,63 +1,85 @@
-// ============================================
-// ECoin Tap-to-Earn - Main Application
-// Version: 2.1.0 - Anti-Cheat Enabled
-// ============================================
+/**
+ * ============================================
+ * ECoin Tap-to-Earn - Main Application
+ * Version: 2.1.0
+ * Security Level: HIGH
+ * ============================================
+ */
 
 // ============================================
-// TOKENOMICS & CONSTANTS
+// TOKENOMICS ENGINE
 // ============================================
-const TOKENOMICS = {
-    TOTAL_SUPPLY: 1000000,        // 1,000,000 ETC total
-    TAP_RATE: 0.001,              // 0.001 ETC per tap (1000 taps = 1 ETC)
-    MAX_TAPS_PER_DAY: 5000,       // Daily limit to prevent abuse
+const Tokenomics = {
+    TOTAL_SUPPLY: 1000000,           // 1,000,000 ETC max
+    TAP_RATE: 0.001,                 // 0.001 ETC per tap (1000 taps = 1 ETC)
+    MAX_TAPS_PER_DAY: 5000,          // Daily limit
     ENERGY_MAX: 100,
-    ENERGY_REGEN_RATE: 1,          // Per 3 seconds
-    ENERGY_COST_PER_TAP: 1,
-    LEVEL_UP_THRESHOLD: 100,       // Taps to level up
-    MULTIPLIER_PER_LEVEL: 0.05,    // 5% more per level
-    COOLDOWN_MS: 150,              // Minimum time between taps
-    MAX_TAPS_PER_SECOND: 5,        // Anti-cheat: max 5 taps/sec
-    DISTRIBUTION_THRESHOLD: 100    // Minimum points to receive ETC
+    ENERGY_REGEN_RATE: 1,            // Per 3 seconds
+    ENERGY_COST: 1,
+    LEVEL_UP_THRESHOLD: 100,         // Taps per level
+    MULTIPLIER_PER_LEVEL: 0.05,      // 5% per level
+    COOLDOWN_MS: 150,                // Between taps
+    MAX_TAPS_PER_SECOND: 5,          // Anti-cheat
+    DISTRIBUTION_THRESHOLD: 100,     // Minimum points for airdrop
+    DAILY_RESET_HOUR: 0,             // 12 AM UTC
 };
 
 // ============================================
-// TELEGRAM INITIALIZATION
+// TELEGRAM INIT
 // ============================================
 const tg = window.Telegram.WebApp;
 tg.expand();
 
 // ============================================
-// STATE MANAGEMENT
+// GAME STATE
 // ============================================
 class GameState {
     constructor() {
-        this.userId = tg.initDataUnsafe?.user?.id || 'anonymous';
+        this.userId = tg.initDataUnsafe?.user?.id || 'anonymous_' + Date.now();
         this.userName = tg.initDataUnsafe?.user?.first_name || 'Mchezaji';
+        this.userEmoji = this.getRandomEmoji();
+        
+        // Game data
         this.balance = 0;
         this.totalTaps = 0;
         this.todayTaps = 0;
         this.level = 1;
-        this.energy = TOKENOMICS.ENERGY_MAX;
-        this.lastTapTime = 0;
-        this.tapHistory = [];
+        this.energy = Tokenomics.ENERGY_MAX;
+        this.multiplier = 1.0;
+        
+        // Wallet
         this.walletAddress = '';
         this.isWalletSaved = false;
+        
+        // Timestamps
+        this.lastTapTime = 0;
         this.lastSaveTime = Date.now();
-        this.totalDistributed = 0;
-        this.multiplier = 1.0;
         this.todayDate = new Date().toDateString();
+        this.totalDistributed = 0;
+        
+        // Anti-cheat
+        this.tapTimestamps = [];
+        this.suspiciousCount = 0;
+        this.isSuspicious = false;
+        
+        // Initialized flag
         this.isInitialized = false;
     }
 
-    // Load from localStorage
+    getRandomEmoji() {
+        const emojis = ['🦊', '🐺', '🐉', '🦄', '🐱', '🦁', '🐼', '🐨', '🦅', '🐬', '🦋', '🌈'];
+        return emojis[Math.floor(Math.random() * emojis.length)];
+    }
+
     load() {
         try {
-            const saved = localStorage.getItem('ecoin_game_state');
+            // Try primary storage (localStorage)
+            const saved = localStorage.getItem('ecoin_state');
             if (saved) {
                 const data = JSON.parse(saved);
                 Object.assign(this, data);
                 
-                // Reset daily taps if new day
+                // Check if new day
                 const today = new Date().toDateString();
                 if (this.todayDate !== today) {
                     this.todayTaps = 0;
@@ -65,39 +87,38 @@ class GameState {
                 }
                 
                 // Regenerate energy since last save
-                const timeSinceSave = (Date.now() - this.lastSaveTime) / 1000;
-                const energyRegen = Math.floor(timeSinceSave / 3) * TOKENOMICS.ENERGY_REGEN_RATE;
-                this.energy = Math.min(this.energy + energyRegen, TOKENOMICS.ENERGY_MAX);
+                const elapsed = (Date.now() - this.lastSaveTime) / 1000;
+                const regen = Math.floor(elapsed / 3) * Tokenomics.ENERGY_REGEN_RATE;
+                this.energy = Math.min(this.energy + regen, Tokenomics.ENERGY_MAX);
                 
                 this.isInitialized = true;
                 return true;
             }
         } catch (e) {
-            console.warn('Error loading state:', e);
+            console.warn('Load error:', e);
         }
         return false;
     }
 
-    // Save to localStorage
     save() {
         try {
             this.lastSaveTime = Date.now();
-            localStorage.setItem('ecoin_game_state', JSON.stringify(this));
+            const data = JSON.stringify(this);
+            localStorage.setItem('ecoin_state', data);
             
-            // Also save to Telegram CloudStorage if available
+            // Backup to Telegram CloudStorage
             if (tg.CloudStorage) {
-                tg.CloudStorage.setItem('ecoin_state', JSON.stringify(this), (err) => {
-                    if (err) console.warn('CloudStorage save failed:', err);
+                tg.CloudStorage.setItem('ecoin_state', data, (err) => {
+                    if (err) console.warn('CloudStorage save failed');
                 });
             }
             return true;
         } catch (e) {
-            console.warn('Error saving state:', e);
+            console.warn('Save error:', e);
             return false;
         }
     }
 
-    // Load from Telegram CloudStorage as backup
     async loadFromCloud() {
         return new Promise((resolve) => {
             if (!tg.CloudStorage) {
@@ -114,6 +135,7 @@ class GameState {
                 try {
                     const parsed = JSON.parse(data);
                     Object.assign(this, parsed);
+                    this.isInitialized = true;
                     resolve(true);
                 } catch (e) {
                     resolve(false);
@@ -121,60 +143,87 @@ class GameState {
             });
         });
     }
+
+    // Reset daily if needed
+    checkDailyReset() {
+        const today = new Date().toDateString();
+        if (this.todayDate !== today) {
+            this.todayTaps = 0;
+            this.todayDate = today;
+            this.save();
+        }
+    }
 }
 
 // ============================================
 // ANTI-CHEAT SYSTEM
 // ============================================
-class AntiCheatSystem {
+class AntiCheat {
     constructor() {
-        this.tapTimestamps = [];
-        this.suspiciousActivity = false;
-        this.consecutiveFastTaps = 0;
         this.tapWindow = [];
-        this.MAX_WINDOW_SIZE = 10;
-        this.WINDOW_MS = 1000;
-        this.MAX_TAPS_IN_WINDOW = TOKENOMICS.MAX_TAPS_PER_SECOND;
+        this.windowSize = 10;
+        this.windowMs = 1000;
+        this.maxTaps = Tokenomics.MAX_TAPS_PER_SECOND;
+        this.consecutiveViolations = 0;
+        this.isLocked = false;
+        this.lockUntil = 0;
     }
 
-    // Check if tap is valid
     validateTap(timestamp) {
+        // Check if locked
+        if (this.isLocked && Date.now() < this.lockUntil) {
+            return { valid: false, reason: 'locked' };
+        }
+        if (this.isLocked) {
+            this.isLocked = false;
+            this.consecutiveViolations = 0;
+        }
+
         // Clean old timestamps
-        const cutoff = timestamp - this.WINDOW_MS;
-        this.tapTimestamps = this.tapTimestamps.filter(t => t > cutoff);
+        const cutoff = timestamp - this.windowMs;
+        this.tapWindow = this.tapWindow.filter(t => t > cutoff);
         
-        // Check if over limit
-        if (this.tapTimestamps.length >= this.MAX_TAPS_IN_WINDOW) {
-            this.suspiciousActivity = true;
-            this.consecutiveFastTaps++;
-            return false;
+        // Check rate limit
+        if (this.tapWindow.length >= this.maxTaps) {
+            this.consecutiveViolations++;
+            
+            // Lock if too many violations
+            if (this.consecutiveViolations >= 3) {
+                this.isLocked = true;
+                this.lockUntil = Date.now() + 5000; // 5 second lock
+                return { valid: false, reason: 'locked' };
+            }
+            
+            return { valid: false, reason: 'rate_limit' };
         }
         
-        // Check for automation patterns
-        if (this.consecutiveFastTaps > 3) {
-            this.suspiciousActivity = true;
-            return false;
+        // Check for automation patterns (too consistent timing)
+        if (this.tapWindow.length >= 3) {
+            const intervals = [];
+            for (let i = 1; i < this.tapWindow.length; i++) {
+                intervals.push(this.tapWindow[i] - this.tapWindow[i-1]);
+            }
+            
+            // If all intervals are nearly identical (within 10ms), suspicious
+            const avg = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+            const allSame = intervals.every(i => Math.abs(i - avg) < 10);
+            
+            if (allSame && intervals.length >= 3) {
+                return { valid: false, reason: 'automation_detected' };
+            }
         }
         
-        this.tapTimestamps.push(timestamp);
-        this.consecutiveFastTaps = Math.max(0, this.consecutiveFastTaps - 1);
-        this.suspiciousActivity = false;
-        return true;
+        // Valid tap
+        this.tapWindow.push(timestamp);
+        this.consecutiveViolations = Math.max(0, this.consecutiveViolations - 1);
+        return { valid: true };
     }
 
-    // Reset suspicious flag after cooldown
-    resetSuspicion() {
-        if (this.consecutiveFastTaps > 0) {
-            this.consecutiveFastTaps = Math.max(0, this.consecutiveFastTaps - 1);
-        }
-        if (this.consecutiveFastTaps === 0) {
-            this.suspiciousActivity = false;
-        }
-    }
-
-    // Get security status
-    isSuspicious() {
-        return this.suspiciousActivity;
+    reset() {
+        this.tapWindow = [];
+        this.consecutiveViolations = 0;
+        this.isLocked = false;
+        this.lockUntil = 0;
     }
 }
 
@@ -184,12 +233,11 @@ class AntiCheatSystem {
 class ECoinApp {
     constructor() {
         this.state = new GameState();
-        this.antiCheat = new AntiCheatSystem();
+        this.antiCheat = new AntiCheat();
         this.elements = {};
-        this.tapCooldown = false;
-        this.animationFrame = null;
-        this.leaderboardCache = [];
-        this.lastLeaderboardUpdate = 0;
+        this.isProcessing = false;
+        this._saveTimeout = null;
+        this._leaderboardTimeout = null;
         
         this.init();
     }
@@ -198,7 +246,6 @@ class ECoinApp {
         // Load state
         const loaded = this.state.load();
         if (!loaded) {
-            // Try cloud storage
             this.state.loadFromCloud().then(() => {
                 this.state.save();
                 this.updateUI();
@@ -208,13 +255,13 @@ class ECoinApp {
         // Cache DOM elements
         this.cacheElements();
         
-        // Setup UI
-        this.setupUI();
+        // Setup event listeners
+        this.setupEventListeners();
         
         // Start energy regeneration
         this.startEnergyRegeneration();
         
-        // Setup periodic saves
+        // Setup auto-save
         this.setupAutoSave();
         
         // Load leaderboard
@@ -223,66 +270,102 @@ class ECoinApp {
         // Setup Telegram Main Button
         this.setupTelegramMainButton();
         
-        // Update UI
+        // Initialize UI
         this.updateUI();
         
-        // Log security
-        console.log('🔒 Anti-Cheat System Active');
-        console.log(`💰 Total Supply: ${TOKENOMICS.TOTAL_SUPPLY} ETC`);
-        console.log(`⚡ Tap Rate: ${TOKENOMICS.TAP_RATE} ETC per tap`);
+        // Check daily reset
+        this.state.checkDailyReset();
+        
+        // Log security status
+        console.log('🔒 ECoin Tap v2.1.0');
+        console.log(`💰 Total Supply: ${Tokenomics.TOTAL_SUPPLY} ETC`);
+        console.log(`⚡ Tap Rate: ${Tokenomics.TAP_RATE} ETC/tap`);
+        console.log(`👤 User: ${this.state.userName}`);
+        console.log('✅ Anti-Cheat: ACTIVE');
     }
 
     cacheElements() {
         this.elements = {
+            // Header
             userName: document.getElementById('userName'),
+            userEmoji: document.getElementById('userEmoji'),
+            levelBadge: document.getElementById('levelBadge'),
+            tokenPrice: document.getElementById('tokenPrice'),
+            
+            // Balance
             balance: document.getElementById('balance'),
-            balanceSub: document.querySelector('.balance-sub'),
+            balanceChange: document.getElementById('balanceChange'),
+            progressFill: document.getElementById('progressFill'),
+            progressLabel: document.getElementById('progressLabel'),
+            
+            // Energy
             energyFill: document.getElementById('energyFill'),
             energyText: document.getElementById('energyText'),
+            
+            // Tap
             tapButton: document.getElementById('tapButton'),
-            tapPoints: document.getElementById('tapPoints'),
+            tapReward: document.getElementById('tapReward'),
             todayTaps: document.getElementById('todayTaps'),
-            multiplier: document.getElementById('multiplier'),
-            levelDisplay: document.getElementById('levelDisplay'),
-            totalPoints: document.getElementById('totalPoints'),
-            totalTaps: document.getElementById('totalTaps'),
-            totalPlayers: document.getElementById('totalPlayers'),
-            totalDistributed: document.getElementById('totalDistributed'),
-            progressBar: document.getElementById('progressBar'),
-            progressText: document.getElementById('progressText'),
-            walletAddress: document.getElementById('walletAddress'),
+            multiplierDisplay: document.getElementById('multiplierDisplay'),
+            totalTapsDisplay: document.getElementById('totalTapsDisplay'),
+            
+            // Wallet
+            walletInput: document.getElementById('walletInput'),
             saveWalletBtn: document.getElementById('saveWalletBtn'),
             walletStatus: document.getElementById('walletStatus'),
+            
+            // Stats
+            levelDisplay: document.getElementById('levelDisplay'),
+            playerCount: document.getElementById('playerCount'),
+            distributedDisplay: document.getElementById('distributedDisplay'),
+            pointsDisplay: document.getElementById('pointsDisplay'),
+            totalSupplyDisplay: document.getElementById('totalSupplyDisplay'),
+            
+            // Leaderboard
             leaderboardList: document.getElementById('leaderboardList'),
             refreshLeaderboard: document.getElementById('refreshLeaderboard'),
-            coinImage: document.getElementById('coinImage')
+            
+            // Share
+            shareBtn: document.getElementById('shareBtn'),
         };
     }
 
-    setupUI() {
-        // Set user name
-        this.elements.userName.textContent = this.state.userName;
-        
-        // Wallet input events
-        this.elements.walletAddress.addEventListener('input', () => this.validateWalletInput());
-        this.elements.saveWalletBtn.addEventListener('click', () => this.saveWallet());
-        
-        // Tap button events
+    setupEventListeners() {
+        // Tap button
         this.elements.tapButton.addEventListener('click', (e) => this.handleTap(e));
         this.elements.tapButton.addEventListener('touchstart', (e) => {
             e.preventDefault();
             this.handleTap(e);
         }, { passive: false });
         
+        // Wallet
+        this.elements.walletInput.addEventListener('input', () => this.validateWalletInput());
+        this.elements.saveWalletBtn.addEventListener('click', () => this.saveWallet());
+        
         // Leaderboard refresh
         this.elements.refreshLeaderboard.addEventListener('click', () => this.loadLeaderboard());
         
+        // Share button
+        this.elements.shareBtn.addEventListener('click', () => this.shareInvite());
+        
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
-            if (e.key === ' ' || e.key === 'Enter') {
+            if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) {
                 e.preventDefault();
                 this.handleTap(e);
             }
+        });
+        
+        // Visibility change - save on tab switch
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                this.state.save();
+            }
+        });
+        
+        // Before unload - save
+        window.addEventListener('beforeunload', () => {
+            this.state.save();
         });
     }
 
@@ -290,150 +373,159 @@ class ECoinApp {
     // TAP HANDLING
     // ============================================
     handleTap(event) {
-        // Check cooldown
+        // Prevent double processing
+        if (this.isProcessing) return;
+        
         const now = Date.now();
-        if (this.tapCooldown) return;
         
         // Check energy
-        if (this.state.energy < TOKENOMICS.ENERGY_COST_PER_TAP) {
+        if (this.state.energy < Tokenomics.ENERGY_COST) {
             this.showNotification('⚡ Nishati imeisha! Subiri ijaze.');
             return;
         }
         
         // Check daily limit
-        if (this.state.todayTaps >= TOKENOMICS.MAX_TAPS_PER_DAY) {
+        if (this.state.todayTaps >= Tokenomics.MAX_TAPS_PER_DAY) {
             this.showNotification('📊 Umefikia kikomo cha taps leo! Rudi kesho.');
             return;
         }
         
         // Anti-cheat validation
-        if (!this.antiCheat.validateTap(now)) {
-            this.showNotification('⚠️ Shughuli isiyo ya kawaida! Tafadhali pumzika.');
-            this.elements.tapButton.classList.add('disabled');
-            setTimeout(() => {
-                this.elements.tapButton.classList.remove('disabled');
-                this.antiCheat.resetSuspicion();
-            }, 3000);
+        const validation = this.antiCheat.validateTap(now);
+        if (!validation.valid) {
+            if (validation.reason === 'locked') {
+                this.showNotification('⛔ Ulinzi umewashwa! Subiri sekunde chache.');
+                this.elements.tapButton.classList.add('disabled');
+                setTimeout(() => {
+                    this.elements.tapButton.classList.remove('disabled');
+                }, 5000);
+            } else if (validation.reason === 'rate_limit') {
+                this.showNotification('⚠️ Tafadhali pumzika! Unagusa haraka sana.');
+            } else if (validation.reason === 'automation_detected') {
+                this.showNotification('🚫 Mfumo wa auto-clicker umegunduliwa!');
+                this.elements.tapButton.classList.add('disabled');
+                setTimeout(() => {
+                    this.elements.tapButton.classList.remove('disabled');
+                }, 10000);
+            }
             return;
         }
         
         // Process tap
+        this.isProcessing = true;
         this.processTap(now);
+        this.isProcessing = false;
     }
 
     processTap(timestamp) {
         // Deduct energy
-        this.state.energy -= TOKENOMICS.ENERGY_COST_PER_TAP;
+        this.state.energy -= Tokenomics.ENERGY_COST;
         
-        // Calculate points with multiplier
-        const basePoints = TOKENOMICS.TAP_RATE;
-        const multiplier = 1 + (this.state.level - 1) * TOKENOMICS.MULTIPLIER_PER_LEVEL;
-        const points = basePoints * multiplier;
+        // Calculate reward with multiplier
+        const baseReward = Tokenomics.TAP_RATE;
+        const multiplier = 1 + (this.state.level - 1) * Tokenomics.MULTIPLIER_PER_LEVEL;
+        const reward = baseReward * multiplier;
         
         // Update state
-        this.state.balance += points;
+        this.state.balance += reward;
         this.state.totalTaps += 1;
         this.state.todayTaps += 1;
         this.state.multiplier = multiplier;
         
-        // Level up
-        const newLevel = Math.floor(this.state.totalTaps / TOKENOMICS.LEVEL_UP_THRESHOLD) + 1;
+        // Check level up
+        const newLevel = Math.floor(this.state.totalTaps / Tokenomics.LEVEL_UP_THRESHOLD) + 1;
         if (newLevel > this.state.level) {
             this.state.level = newLevel;
-            this.showNotification(`🎉 Ngazi ${newLevel}! Multiplier +${(TOKENOMICS.MULTIPLIER_PER_LEVEL * 100).toFixed(0)}%`);
+            this.showNotification(`🎉 Ngazi ${newLevel}! Multiplier +${(Tokenomics.MULTIPLIER_PER_LEVEL * 100).toFixed(0)}%`);
         }
         
         // Update UI
         this.updateUI();
+        this.showTapEffect(reward);
+        this.animateTapButton();
         
-        // Visual effects
-        this.animateTap();
-        this.showFloatingText(points);
-        
-        // Trigger haptic feedback
+        // Haptic feedback
         if (tg.HapticFeedback) {
             tg.HapticFeedback.impactOccurred('light');
         }
         
-        // Auto save (debounced)
+        // Auto-save
         this.debounceSave();
-        
-        // Set cooldown
-        this.tapCooldown = true;
-        setTimeout(() => {
-            this.tapCooldown = false;
-        }, TOKENOMICS.COOLDOWN_MS);
-        
-        // Reset anti-cheat suspicion gradually
-        setTimeout(() => {
-            this.antiCheat.resetSuspicion();
-        }, 2000);
     }
 
     // ============================================
-    // UI UPDATE FUNCTIONS
+    // UI UPDATES
     // ============================================
     updateUI() {
         // Balance
         this.elements.balance.textContent = this.state.balance.toFixed(3);
-        this.elements.balanceSub.textContent = `≈ ${(this.state.balance * 0.01).toFixed(4)} ETC`;
+        
+        // Balance change animation
+        const changeEl = this.elements.balanceChange;
+        changeEl.textContent = `+${Tokenomics.TAP_RATE.toFixed(3)}`;
+        changeEl.classList.add('show');
+        setTimeout(() => changeEl.classList.remove('show'), 1000);
         
         // Energy
-        const energyPercent = (this.state.energy / TOKENOMICS.ENERGY_MAX) * 100;
+        const energyPercent = (this.state.energy / Tokenomics.ENERGY_MAX) * 100;
         this.elements.energyFill.style.width = `${energyPercent}%`;
-        this.elements.energyText.textContent = `${Math.floor(this.state.energy)}/${TOKENOMICS.ENERGY_MAX}`;
+        this.elements.energyText.textContent = `${Math.floor(this.state.energy)} / ${Tokenomics.ENERGY_MAX}`;
+        
+        // Progress
+        const tapsInLevel = this.state.totalTaps % Tokenomics.LEVEL_UP_THRESHOLD;
+        const progress = (tapsInLevel / Tokenomics.LEVEL_UP_THRESHOLD) * 100;
+        this.elements.progressFill.style.width = `${progress}%`;
+        this.elements.progressLabel.textContent = `${progress.toFixed(0)}% hadi Ngazi ${this.state.level + 1}`;
         
         // Stats
         this.elements.todayTaps.textContent = this.state.todayTaps;
-        this.elements.multiplier.textContent = `${this.state.multiplier.toFixed(2)}x`;
+        this.elements.multiplierDisplay.textContent = `${this.state.multiplier.toFixed(2)}x`;
+        this.elements.totalTapsDisplay.textContent = this.state.totalTaps.toLocaleString();
         this.elements.levelDisplay.textContent = this.state.level;
-        this.elements.totalPoints.textContent = this.state.balance.toFixed(1);
-        this.elements.totalTaps.textContent = this.state.totalTaps;
+        this.elements.levelBadge.textContent = this.state.level;
+        this.elements.pointsDisplay.textContent = this.state.balance.toFixed(1);
         
-        // Tap points display
-        const basePoints = TOKENOMICS.TAP_RATE * this.state.multiplier;
-        this.elements.tapPoints.textContent = `+${basePoints.toFixed(3)}`;
+        // Tap reward
+        const reward = Tokenomics.TAP_RATE * this.state.multiplier;
+        this.elements.tapReward.textContent = `+${reward.toFixed(3)}`;
         
-        // Progress to next level
-        const tapsInLevel = this.state.totalTaps % TOKENOMICS.LEVEL_UP_THRESHOLD;
-        const progress = (tapsInLevel / TOKENOMICS.LEVEL_UP_THRESHOLD) * 100;
-        this.elements.progressBar.style.width = `${progress}%`;
-        this.elements.progressText.textContent = `${progress.toFixed(0)}% hadi Ngazi ${this.state.level + 1}`;
-        
-        // Wallet status
+        // Wallet
         if (this.state.isWalletSaved) {
-            this.elements.walletAddress.value = this.state.walletAddress;
-            this.elements.walletAddress.disabled = true;
-            this.elements.saveWalletBtn.textContent = '✅ Imeshahifadhiwa';
-            this.elements.saveWalletBtn.disabled = true;
+            this.elements.walletInput.value = this.state.walletAddress;
+            this.elements.walletInput.disabled = true;
+            this.elements.saveWalletBtn.classList.add('saved');
+            this.elements.saveWalletBtn.querySelector('.btn-text').textContent = 'Imeshahifadhiwa';
         }
         
-        // Update document title
+        // User
+        this.elements.userName.textContent = this.state.userName;
+        this.elements.userEmoji.textContent = this.state.userEmoji;
+        
+        // Total supply
+        this.elements.totalSupplyDisplay.textContent = Tokenomics.TOTAL_SUPPLY.toLocaleString();
+        
+        // Document title
         document.title = `💰 ${this.state.balance.toFixed(1)} ETC - ECoin Tap`;
     }
 
     // ============================================
-    // ANIMATIONS & VISUAL EFFECTS
+    // VISUAL EFFECTS
     // ============================================
-    animateTap() {
-        this.elements.tapButton.classList.add('tap-animation');
+    animateTapButton() {
+        const btn = this.elements.tapButton;
+        btn.style.transform = 'scale(0.92)';
         setTimeout(() => {
-            this.elements.tapButton.classList.remove('tap-animation');
-        }, 150);
-        
-        // Coin rotation
-        this.elements.coinImage.style.transform = 'rotate(15deg) scale(0.9)';
-        setTimeout(() => {
-            this.elements.coinImage.style.transform = 'rotate(0deg) scale(1)';
-        }, 150);
+            btn.style.transform = 'scale(1)';
+        }, 100);
     }
 
-    showFloatingText(points) {
+    showTapEffect(reward) {
+        // Floating text
         const text = document.createElement('div');
         text.className = 'float-text';
-        text.textContent = `+${points.toFixed(3)}`;
-        text.style.left = `${window.innerWidth / 2 - 30}px`;
-        text.style.top = `${window.innerHeight / 2 - 100}px`;
+        text.textContent = `+${reward.toFixed(3)}`;
+        text.style.left = `${window.innerWidth / 2 - 40}px`;
+        text.style.top = `${window.innerHeight / 2 - 120}px`;
         document.body.appendChild(text);
         setTimeout(() => text.remove(), 1000);
     }
@@ -442,7 +534,26 @@ class ECoinApp {
         if (tg.showAlert) {
             tg.showAlert(message);
         } else {
-            alert(message);
+            // Fallback
+            const toast = document.createElement('div');
+            toast.style.cssText = `
+                position: fixed;
+                bottom: 80px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: rgba(0,0,0,0.8);
+                color: white;
+                padding: 12px 24px;
+                border-radius: 12px;
+                font-size: 14px;
+                z-index: 9999;
+                max-width: 90%;
+                text-align: center;
+                animation: fadeIn 0.3s ease;
+            `;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
         }
     }
 
@@ -451,10 +562,10 @@ class ECoinApp {
     // ============================================
     startEnergyRegeneration() {
         setInterval(() => {
-            if (this.state.energy < TOKENOMICS.ENERGY_MAX) {
+            if (this.state.energy < Tokenomics.ENERGY_MAX) {
                 this.state.energy = Math.min(
-                    this.state.energy + TOKENOMICS.ENERGY_REGEN_RATE,
-                    TOKENOMICS.ENERGY_MAX
+                    this.state.energy + Tokenomics.ENERGY_REGEN_RATE,
+                    Tokenomics.ENERGY_MAX
                 );
                 this.updateUI();
             }
@@ -462,7 +573,7 @@ class ECoinApp {
     }
 
     // ============================================
-    // AUTO-SAVE SYSTEM
+    // AUTO-SAVE
     // ============================================
     debounceSave() {
         clearTimeout(this._saveTimeout);
@@ -474,37 +585,34 @@ class ECoinApp {
     setupAutoSave() {
         setInterval(() => {
             this.state.save();
-        }, 30000); // Save every 30 seconds
+        }, 30000);
     }
 
     // ============================================
     // WALLET MANAGEMENT
     // ============================================
     validateWalletInput() {
-        const address = this.elements.walletAddress.value.trim();
+        const address = this.elements.walletInput.value.trim();
+        
         if (address.length === 0) {
-            this.elements.walletAddress.style.borderColor = 'var(--border-color)';
+            this.elements.walletInput.className = 'wallet-input';
             return;
         }
         
-        if (address.startsWith('0x') && address.length === 42 && /^0x[a-fA-F0-9]{40}$/.test(address)) {
-            this.elements.walletAddress.style.borderColor = '#2ed573';
-        } else {
-            this.elements.walletAddress.style.borderColor = '#ff4757';
-        }
+        const isValid = this.isValidEthereumAddress(address);
+        this.elements.walletInput.className = `wallet-input ${isValid ? 'valid' : 'invalid'}`;
+    }
+
+    isValidEthereumAddress(address) {
+        return /^0x[a-fA-F0-9]{40}$/.test(address);
     }
 
     saveWallet() {
-        const address = this.elements.walletAddress.value.trim();
+        const address = this.elements.walletInput.value.trim();
         
         // Validate
-        if (!address.startsWith('0x') || address.length !== 42) {
+        if (!this.isValidEthereumAddress(address)) {
             this.showWalletStatus('error', '❌ Anwani batili! Inatakiwa ianze na "0x" na iwe na herufi 42.');
-            return;
-        }
-        
-        if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
-            this.showWalletStatus('error', '❌ Anwani batili! Tafadhali ingiza anwani halali ya Ethereum.');
             return;
         }
         
@@ -513,8 +621,11 @@ class ECoinApp {
         this.state.isWalletSaved = true;
         this.state.save();
         
-        this.showWalletStatus('success', '✅ Anwani imehifadhiwa! ETC zitatumwa hapa.');
+        this.showWalletStatus('success', '✅ Anwani imehifadhiwa! ETC zitatumwa hapa siku ya airdrop.');
         this.updateUI();
+        
+        // Send wallet to bot via Telegram
+        this.sendWalletToBot(address);
     }
 
     showWalletStatus(type, message) {
@@ -525,66 +636,182 @@ class ECoinApp {
         
         setTimeout(() => {
             status.style.display = 'none';
-        }, 5000);
+        }, 6000);
+    }
+
+    // ============================================
+    // SEND WALLET TO TELEGRAM BOT
+    // ============================================
+    sendWalletToBot(address) {
+        // Method 1: Using Telegram WebApp sendData
+        if (tg.sendData) {
+            const data = JSON.stringify({
+                action: 'save_wallet',
+                userId: this.state.userId,
+                userName: this.state.userName,
+                wallet: address,
+                balance: this.state.balance,
+                timestamp: new Date().toISOString()
+            });
+            tg.sendData(data);
+            console.log('📤 Wallet sent to bot via sendData');
+        }
+        
+        // Method 2: Store in localStorage for batch collection
+        this.collectWalletData(address);
+    }
+
+    collectWalletData(address) {
+        // Store in a dedicated key for easy collection
+        const wallets = JSON.parse(localStorage.getItem('ecoin_wallets') || '[]');
+        
+        // Check if already exists
+        const exists = wallets.find(w => w.userId === this.state.userId);
+        if (!exists) {
+            wallets.push({
+                userId: this.state.userId,
+                userName: this.state.userName,
+                wallet: address,
+                balance: this.state.balance,
+                totalTaps: this.state.totalTaps,
+                savedAt: new Date().toISOString()
+            });
+            localStorage.setItem('ecoin_wallets', JSON.stringify(wallets));
+            console.log('📊 Wallet data collected:', wallets.length, 'wallets');
+        }
+    }
+
+    // ============================================
+    // GET ALL WALLETS (For Airdrop)
+    // ============================================
+    getAllWallets() {
+        try {
+            const data = localStorage.getItem('ecoin_wallets');
+            return data ? JSON.parse(data) : [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    exportWalletsForAirdrop() {
+        const wallets = this.getAllWallets();
+        const eligible = wallets.filter(w => w.balance >= Tokenomics.DISTRIBUTION_THRESHOLD);
+        
+        // Format for airdrop
+        const airdropData = eligible.map(w => ({
+            address: w.wallet,
+            userId: w.userId,
+            userName: w.userName,
+            etcAmount: (w.balance * Tokenomics.TAP_RATE).toFixed(4),
+            points: w.balance
+        }));
+        
+        // Download as CSV/JSON
+        const blob = new Blob([JSON.stringify(airdropData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `airdrop_${new Date().toISOString().split('T')[0]}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        
+        return airdropData;
     }
 
     // ============================================
     // LEADERBOARD
     // ============================================
-    async loadLeaderboard() {
+    loadLeaderboard() {
         try {
-            this.elements.leaderboardList.innerHTML = '<div class="loading-spinner">⏳ Inapakia...</div>';
-            
-            // Generate local leaderboard from localStorage
-            const players = this.getLocalLeaderboard();
-            
-            if (players.length === 0) {
-                this.elements.leaderboardList.innerHTML = '<div class="loading-spinner">🏆 Hakuna wachezaji bado</div>';
-                return;
-            }
-            
+            const players = this.getLeaderboardData();
             this.renderLeaderboard(players);
-        } catch (error) {
-            console.error('Error loading leaderboard:', error);
-            this.elements.leaderboardList.innerHTML = '<div class="loading-spinner">❌ Imeshindwa kupakia</div>';
+        } catch (e) {
+            console.error('Leaderboard error:', e);
         }
     }
 
-    getLocalLeaderboard() {
-        // Get all game states from localStorage
+    getLeaderboardData() {
         const players = [];
         
+        // Get current user
+        players.push({
+            userId: this.state.userId,
+            userName: this.state.userName,
+            balance: this.state.balance,
+            totalTaps: this.state.totalTaps,
+            isCurrentUser: true
+        });
+        
+        // Get from localStorage
         for (let i = 0; i < localStorage.length; i++) {
             const key = localStorage.key(i);
-            if (key && key.startsWith('ecoin_')) {
+            if (key && key.startsWith('ecoin_state_')) {
                 try {
                     const data = JSON.parse(localStorage.getItem(key));
-                    if (data && data.balance !== undefined) {
+                    if (data && data.userId !== this.state.userId) {
                         players.push({
-                            name: data.userName || 'Mchezaji',
+                            userId: data.userId,
+                            userName: data.userName || 'Mchezaji',
                             balance: data.balance || 0,
-                            taps: data.totalTaps || 0
+                            totalTaps: data.totalTaps || 0,
+                            isCurrentUser: false
                         });
                     }
                 } catch (e) {}
             }
         }
         
+        // Also check main state in localStorage
+        const mainState = localStorage.getItem('ecoin_state');
+        if (mainState) {
+            try {
+                const data = JSON.parse(mainState);
+                // Check if current user is already in list
+                const exists = players.find(p => p.userId === data.userId);
+                if (!exists && data.userId !== this.state.userId) {
+                    players.push({
+                        userId: data.userId,
+                        userName: data.userName || 'Mchezaji',
+                        balance: data.balance || 0,
+                        totalTaps: data.totalTaps || 0,
+                        isCurrentUser: false
+                    });
+                }
+            } catch (e) {}
+        }
+        
         // Sort by balance descending
         players.sort((a, b) => b.balance - a.balance);
-        return players.slice(0, 10);
+        return players.slice(0, 20);
     }
 
     renderLeaderboard(players) {
-        this.elements.leaderboardList.innerHTML = players.map((player, index) => {
-            const rankClass = index === 0 ? 'top1' : index === 1 ? 'top2' : index === 2 ? 'top3' : '';
+        const list = this.elements.leaderboardList;
+        
+        if (!players || players.length === 0) {
+            list.innerHTML = `
+                <div class="loading-state">
+                    <span>🏆</span>
+                    <span>Hakuna wachezaji bado</span>
+                </div>
+            `;
+            return;
+        }
+        
+        // Update player count
+        this.elements.playerCount.textContent = players.length;
+        
+        list.innerHTML = players.map((player, index) => {
+            const rankClass = index === 0 ? 'gold' : index === 1 ? 'silver' : index === 2 ? 'bronze' : '';
             const rankEmoji = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `#${index + 1}`;
+            const isYou = player.isCurrentUser ? '⭐ ' : '';
             
             return `
-                <div class="leaderboard-item ${rankClass}">
-                    <span class="rank">${rankEmoji}</span>
-                    <span class="name">${this.escapeHtml(player.name)}</span>
+                <div class="leaderboard-item" style="animation-delay: ${index * 0.05}s">
+                    <span class="rank ${rankClass}">${rankEmoji}</span>
+                    <span class="name">${isYou}${this.escapeHtml(player.userName)}</span>
                     <span class="points">${player.balance.toFixed(1)} ETC</span>
+                    <span class="taps">${player.totalTaps} taps</span>
                 </div>
             `;
         }).join('');
@@ -597,6 +824,21 @@ class ECoinApp {
     }
 
     // ============================================
+    // SHARE & INVITE
+    // ============================================
+    shareInvite() {
+        const inviteLink = `https://t.me/share/url?url=🎮%20ECoin%20Tap-to-Earn!%20Pata%20ETC%20kwa%20kugusa!%0A%0A👤%20Mwaliko%20kutoka%3A%20${encodeURIComponent(this.state.userName)}%0A💰%20Pointi%3A%20${this.state.balance.toFixed(1)}%0A🏆%20Ngazi%3A%20${this.state.level}%0A%0A🚀%20Anza%20sasa%3A%20https://t.me/YourBotName`;
+        
+        if (tg.openLink) {
+            tg.openLink(inviteLink);
+        } else {
+            navigator.clipboard.writeText(inviteLink).then(() => {
+                this.showNotification('✅ Kiungo kimenakiliwa! Tuma kwa marafiki.');
+            });
+        }
+    }
+
+    // ============================================
     // TELEGRAM INTEGRATION
     // ============================================
     setupTelegramMainButton() {
@@ -604,8 +846,11 @@ class ECoinApp {
         tg.MainButton.show();
         
         tg.MainButton.onClick(() => {
-            const etcAmount = this.state.balance * 0.01;
-            const isEligible = this.state.balance >= TOKENOMICS.DISTRIBUTION_THRESHOLD;
+            const etcAmount = this.state.balance * Tokenomics.TAP_RATE;
+            const isEligible = this.state.balance >= Tokenomics.DISTRIBUTION_THRESHOLD;
+            const walletStatus = this.state.isWalletSaved ? 
+                this.state.walletAddress.substring(0, 8) + '...' + this.state.walletAddress.substring(38) : 
+                '❌ Hujahifadhi';
             
             tg.showAlert(`
 📊 TAKWIMU ZAKO
@@ -615,85 +860,89 @@ class ECoinApp {
 🏆 Ngazi: ${this.state.level}
 👆 Taps: ${this.state.totalTaps}
 ⚡ Multiplier: ${this.state.multiplier.toFixed(2)}x
-🔑 Wallet: ${this.state.isWalletSaved ? this.state.walletAddress.substring(0, 8) + '...' + this.state.walletAddress.substring(38) : '❌ Hujahifadhi'}
+🔑 Wallet: ${walletStatus}
 ━━━━━━━━━━━━━━━━━
-🎯 Hali: ${isEligible ? '✅ Unastahiki ETC!' : `⚠️ Unahitaji ${TOKENOMICS.DISTRIBUTION_THRESHOLD} pointi`}
-📈 Maendeleo: ${((this.state.balance / TOKENOMICS.DISTRIBUTION_THRESHOLD) * 100).toFixed(0)}%
+🎯 Hali: ${isEligible ? '✅ Unastahiki ETC!' : `⚠️ Unahitaji ${Tokenomics.DISTRIBUTION_THRESHOLD} pointi`}
+📈 Maendeleo: ${((this.state.balance / Tokenomics.DISTRIBUTION_THRESHOLD) * 100).toFixed(0)}%
 ━━━━━━━━━━━━━━━━━
-🏷️ Total Supply: ${TOKENOMICS.TOTAL_SUPPLY} ETC
+🏷️ Total Supply: ${Tokenomics.TOTAL_SUPPLY} ETC
 🔒 Ulinzi: Imewashwa
             `);
         });
     }
 
     // ============================================
-    // SHARE & INVITE
+    // ADMIN FUNCTIONS
     // ============================================
-    shareInvite() {
-        const inviteLink = `https://t.me/YourBotName?start=${this.state.userId}`;
-        if (tg.shareToStory) {
-            tg.shareToStory(inviteLink);
-        } else {
-            navigator.clipboard.writeText(inviteLink).then(() => {
-                this.showNotification('✅ Kiungo kimenakiliwa! Tuma kwa marafiki.');
-            });
+    // Expose for debugging and admin
+    getState() {
+        return this.state;
+    }
+
+    resetGame() {
+        if (confirm('Je, una uhakika unataka kuanzisha upya mchezo? Data yote itafutwa.')) {
+            localStorage.removeItem('ecoin_state');
+            localStorage.removeItem('ecoin_wallets');
+            this.state = new GameState();
+            this.antiCheat.reset();
+            this.updateUI();
+            this.showNotification('✅ Mchezo umeanzishwa upya');
         }
     }
 
-    // ============================================
-    // DATA EXPORT (for backup)
-    // ============================================
     exportData() {
         const data = {
             state: this.state,
-            version: '2.1.0',
-            exportDate: new Date().toISOString()
+            wallets: this.getAllWallets(),
+            leaderboard: this.getLeaderboardData(),
+            exportDate: new Date().toISOString(),
+            version: '2.1.0'
         };
         
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `ecoin_backup_${this.state.userId}_${Date.now()}.json`;
+        a.download = `ecoin_data_${new Date().toISOString().split('T')[0]}.json`;
         a.click();
         URL.revokeObjectURL(url);
     }
 }
 
 // ============================================
-// INITIALIZE APPLICATION
+// INITIALIZE
 // ============================================
 let app;
 
-// Wait for DOM to load
 document.addEventListener('DOMContentLoaded', () => {
     app = new ECoinApp();
-});
-
-// Handle visibility change (save on tab switch)
-document.addEventListener('visibilitychange', () => {
-    if (document.hidden && app) {
-        app.state.save();
-    }
-});
-
-// Handle beforeunload (save on close)
-window.addEventListener('beforeunload', () => {
-    if (app) {
-        app.state.save();
-    }
 });
 
 // ============================================
 // EXPOSE FOR DEBUGGING
 // ============================================
 window.__ECoin = {
-    app,
-    TOKENOMICS,
+    app: () => app,
+    Tokenomics,
     version: '2.1.0',
-    debug: () => console.log('ECoin App:', app?.state)
+    exportWallets: () => app?.exportWalletsForAirdrop(),
+    getState: () => app?.getState(),
+    getAllWallets: () => app?.getAllWallets(),
+    reset: () => app?.resetGame(),
+    exportData: () => app?.exportData(),
+    debug: () => {
+        if (app) {
+            console.log('=== ECoin Debug ===');
+            console.log('State:', app.state);
+            console.log('Wallets:', app.getAllWallets());
+            console.log('Leaderboard:', app.getLeaderboardData());
+            console.log('AntiCheat:', app.antiCheat);
+        } else {
+            console.log('⏳ App not initialized yet');
+        }
+    }
 };
 
-console.log('🚀 ECoin Tap-to-Earn v2.1.0');
-console.log('🔒 Anti-Cheat: Active');
-console.log(`💰 Total Supply: ${TOKENOMICS.TOTAL_SUPPLY} ETC`);
+console.log('🚀 ECoin Tap v2.1.0 Loaded');
+console.log('🔧 Use __ECoin.debug() for debugging');
+console.log('📤 Use __ECoin.exportWallets() for airdrop data');
